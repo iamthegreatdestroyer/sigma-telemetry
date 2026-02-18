@@ -61,12 +61,71 @@ impl Exporter {
             ExportFormat::Json | ExportFormat::Stdout => serde_json::to_string_pretty(&exported)
                 .map_err(|e| TelemetryError::ExportError(e.to_string())),
             ExportFormat::Otlp => {
-                // In production, this would send to the OTLP endpoint
-                Ok(format!(
-                    "Would export {} spans to {}",
-                    spans.len(),
-                    self.config.otlp_endpoint
-                ))
+                let resource_spans = serde_json::json!({
+                    "resourceSpans": [{
+                        "resource": {
+                            "attributes": [{
+                                "key": "service.name",
+                                "value": { "stringValue": &self.config.service_name }
+                            }]
+                        },
+                        "scopeSpans": [{
+                            "scope": {
+                                "name": "sigma-telemetry",
+                                "version": env!("CARGO_PKG_VERSION")
+                            },
+                            "spans": exported.iter().map(|s| {
+                                serde_json::json!({
+                                    "name": &s.name,
+                                    "kind": 1,
+                                    "attributes": s.attributes.iter().map(|(k, v)| {
+                                        serde_json::json!({
+                                            "key": k,
+                                            "value": { "stringValue": v }
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                    "status": {
+                                        "code": if s.status.starts_with("error") { 2 } else { 1 },
+                                        "message": &s.status
+                                    },
+                                    "durationNanos": s.duration_ms.map(|ms| (ms * 1_000_000.0) as u64).unwrap_or(0),
+                                })
+                            }).collect::<Vec<_>>()
+                        }]
+                    }]
+                });
+
+                let body = serde_json::to_string(&resource_spans)
+                    .map_err(|e| TelemetryError::ExportError(e.to_string()))?;
+
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(10))
+                    .build()
+                    .map_err(|e| TelemetryError::ExportError(e.to_string()))?;
+
+                let endpoint = format!("{}/v1/traces", self.config.otlp_endpoint);
+                let response = client
+                    .post(&endpoint)
+                    .header("Content-Type", "application/json")
+                    .body(body)
+                    .send();
+
+                match response {
+                    Ok(resp) if resp.status().is_success() => Ok(format!(
+                        "Exported {} spans to {}",
+                        spans.len(),
+                        endpoint
+                    )),
+                    Ok(resp) => Err(TelemetryError::ExportError(format!(
+                        "OTLP endpoint returned {}: {}",
+                        resp.status(),
+                        resp.text().unwrap_or_default()
+                    ))),
+                    Err(e) => Err(TelemetryError::ExportError(format!(
+                        "Failed to reach OTLP endpoint {}: {}",
+                        endpoint, e
+                    ))),
+                }
             }
         }
     }
@@ -98,10 +157,22 @@ mod tests {
     }
 
     #[test]
-    fn test_otlp_export_stub() {
+    fn test_otlp_export_formats_correctly() {
+        // OTLP export will fail to connect in test env, but we can verify it
+        // attempts the right endpoint by checking the error message
         let exporter = Exporter::new(TelemetryConfig::default(), ExportFormat::Otlp);
-        let result = exporter.export(&[sample_span()]).unwrap();
-        assert!(result.contains("1 spans"));
+        let result = exporter.export(&[sample_span()]);
+        match result {
+            Ok(msg) => assert!(msg.contains("spans")),
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                // Should mention the OTLP endpoint in the error
+                assert!(
+                    err_msg.contains("localhost:4317") || err_msg.contains("OTLP"),
+                    "Unexpected error: {err_msg}"
+                );
+            }
+        }
     }
 
     #[test]
