@@ -8,7 +8,7 @@ repository = "https://github.com/iamthegreatdestroyer/Ryzanstein"
 
 [dependencies]
 opentelemetry = { version = "0.21", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.14", features = ["tonic"] }
+opentelemetry-otlp = { version = "0.14", features = ["tonic"], optional = true }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -30,6 +30,3 @@ default = []
 jaeger = ["opentelemetry-otlp"]
 prometheus = []
 
-[[bench]]
-name = "telemetry_benchmarks"
-harness = false
