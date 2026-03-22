@@ -11,10 +11,8 @@ pub mod spans;
 pub mod exporter;
 pub mod ryzanstein_integration;
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use config::TelemetryConfig;
-use error::TelemetryError;
 
 /// Core telemetry system for Ryzanstein
 pub struct SigmaTelemetry {
@@ -176,7 +174,7 @@ impl SigmaTelemetry {
     }
 
     /// Start a new span for tracing
-    pub fn start_span(&self, name: &str, operation: SpanOperation) -> SpanGuard {
+    pub fn start_span(&self, name: &str, operation: SpanOperation) -> SpanGuard<'_> {
         let record = SpanRecord {
             name: name.to_string(),
             service: self.config.service_name.clone(),
