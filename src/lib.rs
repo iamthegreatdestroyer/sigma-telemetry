@@ -4,21 +4,26 @@
 //! Provides structured tracing, metrics, and log correlation for inference
 //! pipelines, model loading, and agent orchestration.
 
+pub mod aggregation;
 pub mod config;
 pub mod error;
-pub mod metrics;
-pub mod spans;
 pub mod exporter;
+pub mod metrics;
+pub mod prometheus;
 pub mod ryzanstein_integration;
+pub mod spans;
 
-use std::time::{Duration, Instant};
+pub use aggregation::WindowStats;
 use config::TelemetryConfig;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Core telemetry system for Ryzanstein
 pub struct SigmaTelemetry {
     config: TelemetryConfig,
-    metrics: MetricsCollector,
+    metrics: Arc<MetricsCollector>,
     active_spans: std::sync::Mutex<Vec<SpanRecord>>,
+    metrics_server: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 /// Recorded span information
@@ -77,17 +82,19 @@ pub enum SpanStatus {
 
 /// Metrics collector
 pub struct MetricsCollector {
-    counters: std::sync::Mutex<std::collections::HashMap<String, u64>>,
-    histograms: std::sync::Mutex<std::collections::HashMap<String, Vec<f64>>>,
-    gauges: std::sync::Mutex<std::collections::HashMap<String, f64>>,
+    pub(crate) counters: std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    pub(crate) histograms: std::sync::Mutex<std::collections::HashMap<String, Vec<f64>>>,
+    pub(crate) gauges: std::sync::Mutex<std::collections::HashMap<String, f64>>,
+    windows: std::sync::Mutex<std::collections::HashMap<String, aggregation::RollingWindow>>,
 }
 
 impl MetricsCollector {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             counters: std::sync::Mutex::new(std::collections::HashMap::new()),
             histograms: std::sync::Mutex::new(std::collections::HashMap::new()),
             gauges: std::sync::Mutex::new(std::collections::HashMap::new()),
+            windows: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -104,8 +111,25 @@ impl MetricsCollector {
 
     /// Record a histogram value (e.g., latency)
     pub fn record_histogram(&self, name: &str, value: f64) {
-        let mut histograms = self.histograms.lock().unwrap();
-        histograms.entry(name.to_string()).or_default().push(value);
+        {
+            let mut histograms = self.histograms.lock().unwrap();
+            histograms.entry(name.to_string()).or_default().push(value);
+        }
+        let mut windows = self.windows.lock().unwrap();
+        windows
+            .entry(name.to_string())
+            .or_insert_with(|| aggregation::RollingWindow::new(Duration::from_secs(60)))
+            .push(value);
+    }
+
+    /// Rolling-window statistics for a histogram metric.
+    pub fn window_stats(&self, name: &str) -> Option<WindowStats> {
+        let windows = self.windows.lock().unwrap();
+        let w = windows.get(name)?;
+        if w.is_empty() {
+            return None;
+        }
+        Some(w.stats())
     }
 
     /// Set a gauge value
@@ -116,7 +140,12 @@ impl MetricsCollector {
 
     /// Get counter value
     pub fn get_counter(&self, name: &str) -> u64 {
-        self.counters.lock().unwrap().get(name).copied().unwrap_or(0)
+        self.counters
+            .lock()
+            .unwrap()
+            .get(name)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Get gauge value
@@ -138,7 +167,19 @@ impl MetricsCollector {
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let p50 = sorted[count / 2];
         let p99 = sorted[(count as f64 * 0.99) as usize];
-        Some(HistogramStats { count, sum, mean, p50, p99 })
+        Some(HistogramStats {
+            count,
+            sum,
+            mean,
+            p50,
+            p99,
+        })
+    }
+}
+
+impl Default for MetricsCollector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -164,12 +205,24 @@ pub struct TelemetrySnapshot {
 }
 
 impl SigmaTelemetry {
-    /// Create a new telemetry instance
+    /// Create a new telemetry instance.
+    /// If `TELEMETRY_ADDR` env var is set (e.g. `127.0.0.1:9091`), starts the Prometheus
+    /// /metrics server automatically.
     pub fn new(config: TelemetryConfig) -> Self {
+        let metrics = Arc::new(MetricsCollector::new());
+        let server_handle = if let Ok(addr_str) = std::env::var("TELEMETRY_ADDR") {
+            addr_str
+                .parse::<std::net::SocketAddr>()
+                .ok()
+                .map(|addr| prometheus::serve(addr, Arc::clone(&metrics)))
+        } else {
+            None
+        };
         Self {
             config,
-            metrics: MetricsCollector::new(),
+            metrics,
             active_spans: std::sync::Mutex::new(Vec::new()),
+            metrics_server: std::sync::Mutex::new(server_handle),
         }
     }
 
@@ -204,10 +257,24 @@ impl SigmaTelemetry {
         }
         if let Some(duration) = span.duration {
             let key = format!("span.{}.duration_ms", span.operation);
-            self.metrics.record_histogram(&key, duration.as_secs_f64() * 1000.0);
+            self.metrics
+                .record_histogram(&key, duration.as_secs_f64() * 1000.0);
         }
         let mut spans = self.active_spans.lock().unwrap();
         spans.push(span);
+    }
+
+    /// Rolling-window stats for a histogram metric (uses a 60-second window).
+    /// The `window` parameter is accepted for API compatibility but the backing
+    /// window is always 60 s (the default registration window).
+    pub fn window_stats(&self, metric: &str, _window: Duration) -> Option<WindowStats> {
+        self.metrics.window_stats(metric)
+    }
+
+    /// Start a Prometheus /metrics HTTP server on `addr` in a background Tokio task.
+    /// Non-blocking — returns the JoinHandle immediately.  Call `.abort()` to stop.
+    pub fn serve_metrics(&self, addr: std::net::SocketAddr) -> tokio::task::JoinHandle<()> {
+        prometheus::serve(addr, Arc::clone(&self.metrics))
     }
 
     /// Get telemetry snapshot
@@ -227,6 +294,16 @@ impl SigmaTelemetry {
     }
 }
 
+impl Drop for SigmaTelemetry {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.metrics_server.lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+    }
+}
+
 /// RAII span guard that records timing on drop
 pub struct SpanGuard<'a> {
     record: SpanRecord,
@@ -237,7 +314,9 @@ pub struct SpanGuard<'a> {
 impl<'a> SpanGuard<'a> {
     /// Add an attribute to the span
     pub fn set_attribute(&mut self, key: &str, value: &str) {
-        self.record.attributes.push((key.to_string(), value.to_string()));
+        self.record
+            .attributes
+            .push((key.to_string(), value.to_string()));
     }
 
     /// Mark span as OK
@@ -343,10 +422,26 @@ mod tests {
     }
 
     #[test]
+    fn test_window_stats() {
+        let t = test_telemetry();
+        for v in [10.0, 20.0, 30.0] {
+            t.metrics().record_histogram("latency_w", v);
+        }
+        let ws = t
+            .window_stats("latency_w", Duration::from_secs(60))
+            .unwrap();
+        assert!((ws.sum - 60.0).abs() < 1e-9);
+        assert!((ws.mean - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_span_operation_display() {
         assert_eq!(SpanOperation::Inference.to_string(), "inference");
         assert_eq!(SpanOperation::ModelLoad.to_string(), "model.load");
-        assert_eq!(SpanOperation::Custom("foo".into()).to_string(), "custom.foo");
+        assert_eq!(
+            SpanOperation::Custom("foo".into()).to_string(),
+            "custom.foo"
+        );
     }
 
     #[test]

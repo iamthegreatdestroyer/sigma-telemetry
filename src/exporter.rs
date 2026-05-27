@@ -111,11 +111,9 @@ impl Exporter {
                     .send();
 
                 match response {
-                    Ok(resp) if resp.status().is_success() => Ok(format!(
-                        "Exported {} spans to {}",
-                        spans.len(),
-                        endpoint
-                    )),
+                    Ok(resp) if resp.status().is_success() => {
+                        Ok(format!("Exported {} spans to {}", spans.len(), endpoint))
+                    }
                     Ok(resp) => Err(TelemetryError::ExportError(format!(
                         "OTLP endpoint returned {}: {}",
                         resp.status(),

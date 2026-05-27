@@ -7,7 +7,10 @@ pub struct SpanTemplates;
 
 impl SpanTemplates {
     /// Inference request span with model and token attributes
-    pub fn inference(model: &str, max_tokens: usize) -> (SpanOperation, Vec<(&'static str, String)>) {
+    pub fn inference(
+        model: &str,
+        max_tokens: usize,
+    ) -> (SpanOperation, Vec<(&'static str, String)>) {
         (
             SpanOperation::Inference,
             vec![
@@ -48,19 +51,28 @@ impl SpanTemplates {
     }
 
     /// Speculative decoding verification span
-    pub fn speculative_verify(accepted: usize, total: usize) -> (SpanOperation, Vec<(&'static str, String)>) {
+    pub fn speculative_verify(
+        accepted: usize,
+        total: usize,
+    ) -> (SpanOperation, Vec<(&'static str, String)>) {
         (
             SpanOperation::SpeculativeVerify,
             vec![
                 ("speculative.accepted", accepted.to_string()),
                 ("speculative.total", total.to_string()),
-                ("speculative.acceptance_rate", format!("{:.2}", accepted as f64 / total as f64)),
+                (
+                    "speculative.acceptance_rate",
+                    format!("{:.2}", accepted as f64 / total as f64),
+                ),
             ],
         )
     }
 
     /// Agent execution span
-    pub fn agent_execute(agent_id: &str, capability: &str) -> (SpanOperation, Vec<(&'static str, String)>) {
+    pub fn agent_execute(
+        agent_id: &str,
+        capability: &str,
+    ) -> (SpanOperation, Vec<(&'static str, String)>) {
         (
             SpanOperation::AgentExecute,
             vec![

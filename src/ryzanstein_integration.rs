@@ -29,23 +29,35 @@ impl RyzansteinTelemetryClient {
     /// Probe Ryzanstein health
     pub async fn health_check(&self) -> Result<HealthStatus, TelemetryError> {
         let url = format!("{}/health", self.base_url);
-        let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .ok_or_else(|| TelemetryError::RyzansteinError("HTTP client not initialized".into()))?;
 
-        let resp = client.get(&url).send().await
+        let resp = client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| TelemetryError::RyzansteinError(e.to_string()))?;
 
-        resp.json::<HealthStatus>().await
+        resp.json::<HealthStatus>()
+            .await
             .map_err(|e| TelemetryError::RyzansteinError(e.to_string()))
     }
 
     /// Push telemetry data to Ryzanstein
-    pub async fn push_metrics(&self, snapshot: &crate::TelemetrySnapshot) -> Result<(), TelemetryError> {
+    pub async fn push_metrics(
+        &self,
+        snapshot: &crate::TelemetrySnapshot,
+    ) -> Result<(), TelemetryError> {
         let url = format!("{}/v1/telemetry", self.base_url);
-        let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .ok_or_else(|| TelemetryError::RyzansteinError("HTTP client not initialized".into()))?;
 
-        client.post(&url)
+        client
+            .post(&url)
             .json(snapshot)
             .send()
             .await
