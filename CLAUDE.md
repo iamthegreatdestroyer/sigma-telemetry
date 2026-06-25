@@ -126,11 +126,11 @@ git tag v0.2.0 && git push origin v0.2.0
 ## Done Criteria (all must pass)
 - [x] `cargo test` passes — zero failures
 - [x] `RollingWindow` aggregation: p99 and rate calculations correct
-- [ ] Prometheus `/metrics` endpoint serves valid text-format output
+- [x] Prometheus `/metrics` endpoint serves valid text-format output
 - [x] Grafana dashboard JSON committed at `grafana/ryzanstein-dashboard.json`
 - [x] `cargo clippy -- -D warnings` clean
 - [x] `cargo build --release` succeeds
-- [ ] `v0.2.0` tag pushed
+- [x] `v0.2.0` tag pushed
 
 ## Completion Signal
 ```bash
