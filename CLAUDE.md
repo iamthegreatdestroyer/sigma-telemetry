@@ -18,10 +18,10 @@
 | `metrics.rs` — Counter/Histogram/Gauge | ✅ Done |
 | `ryzanstein_integration.rs` — Ryzanstein-specific metrics | ✅ Done |
 | `spans.rs` — SpanOperation tracing | ✅ Done |
-| Streaming aggregation (time windows) | ❌ Missing |
-| Visualization bridge (Grafana dashboard JSON) | ❌ Missing |
-| Integration tests | ❌ Missing |
-| Prometheus /metrics HTTP endpoint | ❌ Partial (needs wire-up) |
+| Streaming aggregation (time windows) | ✅ Done |
+| Visualization bridge (Grafana dashboard JSON) | ✅ Done |
+| Integration tests | ✅ Done |
+| Prometheus /metrics HTTP endpoint | ✅ Done |
 
 ## Key File Map
 ```
