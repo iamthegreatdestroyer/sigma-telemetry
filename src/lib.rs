@@ -10,6 +10,8 @@ pub mod error;
 pub mod exporter;
 pub mod metrics;
 pub mod prometheus;
+#[cfg(feature = "python")]
+mod py;
 pub mod ryzanstein_integration;
 pub mod spans;
 

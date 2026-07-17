@@ -6,6 +6,10 @@ description = "OpenTelemetry-based observability for the Ryzanstein LLM ecosyste
 license = "AGPL-3.0"
 repository = "https://github.com/iamthegreatdestroyer/Ryzanstein"
 
+[lib]
+name = "sigma_telemetry"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 opentelemetry = { version = "0.21", features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.14", features = ["tonic"], optional = true }
@@ -22,6 +26,7 @@ reqwest = { version = "0.11", features = ["json", "blocking"] }
 chrono = { version = "0.4", features = ["serde"] }
 hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
 http = "0.2"
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.9"
@@ -31,4 +36,5 @@ tokio-test = "0.4"
 default = []
 jaeger = ["opentelemetry-otlp"]
 prometheus = []
+python = ["dep:pyo3"]
 
